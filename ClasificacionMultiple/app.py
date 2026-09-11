@@ -1,17 +1,6 @@
 """
-Interfaz de Usuario (Streamlit) — Predicción de Total_Score (regresión continua)
-Refactor: de clasificación de Grade -> regresión de Total_Score.
-
-Requisitos previos: ejecutar primero el notebook 'Proyecto_Regresion_TotalScore.ipynb'
-completo (genera total_score_model.pkl, total_score_scaler.pkl, total_score_poly.pkl,
-total_score_features.pkl y total_score_mae.pkl en la misma carpeta).
-
-Ejecutar con:
-    pip install streamlit joblib scikit-learn pandas numpy
-    streamlit run app.py
-
-Para el theming nativo (colores de sliders/botones), copia streamlit_config.toml a
-.streamlit/config.toml dentro de la carpeta del proyecto.
+Interfaz de Usuario (Streamlit) — Predicción de Nota Final G3 (Dataset UCI student-mat.csv, escala 0-20)
+Refactor: Adaptado a la escala 0-20 y predicción temprana basada en G1 y comportamiento/demografía.
 """
 
 import joblib
@@ -20,24 +9,16 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(
-    page_title="Predicción de Total Score",
+    page_title="Predicción de Nota Final G3",
     page_icon="🎯",
     layout="centered",
 )
 
-# ---------------------------------------------------------------------------
-# Helper: concatena fragmentos HTML en una sola línea, SIN saltos de línea
-# ni espacios de indentación. Esto es crítico: Streamlit pasa unsafe_allow_html
-# por el parser de Markdown antes de renderizar, y cualquier línea en blanco o
-# con sangría dentro del HTML hace que Markdown cierre el bloque HTML crudo y
-# empiece a tratar el resto como un "code block" (de ahí que se vieran las
-# etiquetas <div> como texto literal en vez de renderizarse).
-# ---------------------------------------------------------------------------
 def _html(*parts: str) -> str:
     return "".join(parts)
 
 # ---------------------------------------------------------------------------
-# Identidad visual (misma paleta "boletín académico" del proyecto de clasificación)
+# Identidad visual
 # ---------------------------------------------------------------------------
 CSS = """
 <style>
@@ -70,20 +51,15 @@ section[data-testid="stSidebar"] h2, section[data-testid="stSidebar"] h3 {
     margin-bottom: 1.3rem;
 }
 
-/* --- Tacómetro (gauge semicircular con CSS conic-gradient) ---
-   OJO: el gradiente debe arrancar en 270deg (izquierda, 9 en punto), no en
-   180deg (abajo, 6 en punto). Con 180deg el semicírculo de color quedaba
-   rotado 90° y su mitad se pintaba por DEBAJO del centro, desbordando el
-   contenedor de 140px y tapando el número/banda que van justo después. */
+/* --- Tacómetro (gauge semicircular con CSS conic-gradient, escala 0-20) --- */
 .gauge-wrap { position: relative; width: 260px; height: 140px; margin: 0.4rem auto 0.2rem auto; overflow: hidden; }
 .gauge-arc {
     position: absolute; top: 0; left: 0; width: 260px; height: 260px; border-radius: 50%;
     background: conic-gradient(from 270deg,
-        #8C2F39 0deg 54deg,
-        #B85C2E 54deg 90deg,
-        #B07C1D 90deg 126deg,
-        #6E8F4C 126deg 153deg,
-        #2E6B4F 153deg 180deg,
+        #8C2F39 0deg 90deg,
+        #B85C2E 90deg 108deg,
+        #6E8F4C 108deg 144deg,
+        #2E6B4F 144deg 180deg,
         transparent 180deg 360deg
     );
 }
@@ -108,8 +84,8 @@ section[data-testid="stSidebar"] h2, section[data-testid="stSidebar"] h3 {
 .kpi-band { text-align: center; font-size: 1rem; font-weight: 600; margin-top: -0.3rem; }
 
 .limit-note {
-    font-size: 0.85rem; color: #5B6577; border-left: 3px solid #8C2F39;
-    padding: 0.6rem 0.9rem; background: #F5E6E4; border-radius: 0 6px 6px 0;
+    font-size: 0.85rem; color: #5B6577; border-left: 3px solid #1E2A44;
+    padding: 0.6rem 0.9rem; background: #E7EBF3; border-radius: 0 6px 6px 0;
 }
 .sidebar-rule { border-top: 1px solid rgba(30,42,68,0.15); margin: 0.6rem 0 0.2rem 0; }
 .feature-note { font-size: 0.82rem; color: #5B6577; }
@@ -118,26 +94,22 @@ section[data-testid="stSidebar"] h2, section[data-testid="stSidebar"] h3 {
 st.markdown(CSS, unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------
-# Bandas de score -> color y etiqueta (el burdeos queda reservado para el
-# score más bajo, igual que en el proyecto de clasificación)
+# Bandas de score para escala 0 a 20
 # ---------------------------------------------------------------------------
 def banda_score(valor: float):
-    if valor < 30:
-        return "#8C2F39", "Crítico"
-    elif valor < 50:
-        return "#B85C2E", "Bajo"
-    elif valor < 70:
-        return "#B07C1D", "Medio"
-    elif valor < 85:
+    if valor < 10:
+        return "#8C2F39", "Reprobado"
+    elif valor < 12:
+        return "#B85C2E", "Suficiente"
+    elif valor < 16:
         return "#6E8F4C", "Bueno"
     return "#2E6B4F", "Sobresaliente"
 
 
 def render_gauge(valor: float) -> str:
-    """Genera el HTML/CSS del tacómetro semicircular para un valor 0-100.
-    Devuelve todo en una sola línea (sin \\n ni indentación) a propósito."""
-    valor_clip = max(0.0, min(100.0, valor))
-    angulo = (valor_clip / 100.0) * 180.0 - 90.0  # -90° (izq, 0) .. +90° (der, 100)
+    """Genera el HTML/CSS del tacómetro semicircular para un valor de 0 a 20."""
+    valor_clip = max(0.0, min(20.0, valor))
+    angulo = (valor_clip / 20.0) * 180.0 - 90.0  # -90° (izq, 0) .. +90° (der, 20)
     color, _ = banda_score(valor_clip)
     return _html(
         '<div class="gauge-wrap">',
@@ -146,17 +118,17 @@ def render_gauge(valor: float) -> str:
         f'<div class="gauge-needle" style="transform: translateX(-50%) rotate({angulo:.1f}deg); background:{color};"></div>',
         '<div class="gauge-pivot"></div>',
         '</div>',
-        '<div class="gauge-scale"><span>0</span><span>50</span><span>100</span></div>',
+        '<div class="gauge-scale"><span>0</span><span>10</span><span>20</span></div>',
     )
 
 # ---------------------------------------------------------------------------
-# Carga del modelo, escalador, transformador polinomial (si aplica), features y MAE
+# Carga del modelo y artefactos
 # ---------------------------------------------------------------------------
 @st.cache_resource
 def cargar_artefactos():
     model = joblib.load("total_score_model.pkl")
     scaler = joblib.load("total_score_scaler.pkl")
-    poly = joblib.load("total_score_poly.pkl")          # None si el mejor modelo fue el lineal
+    poly = joblib.load("total_score_poly.pkl")
     feature_columns = joblib.load("total_score_features.pkl")
     mae_test = joblib.load("total_score_mae.pkl")
     return model, scaler, poly, feature_columns, mae_test
@@ -167,8 +139,7 @@ except FileNotFoundError:
     st.error(
         "No se encontraron los artefactos del modelo (total_score_model.pkl, "
         "total_score_scaler.pkl, total_score_poly.pkl, total_score_features.pkl, "
-        "total_score_mae.pkl). Ejecuta primero todas las celdas del notebook "
-        "'Proyecto_Regresion_TotalScore.ipynb' y colócalos en esta misma carpeta."
+        "total_score_mae.pkl). Ejecuta primero 'train_total_score_model.py'."
     )
     st.stop()
 
@@ -178,79 +149,98 @@ except FileNotFoundError:
 st.markdown(
     _html(
         '<div class="app-header">',
-        '<div class="eyebrow">Herramienta de apoyo docente</div>',
-        '<h1>Predicción de Total Score</h1>',
-        '<p>Estima el puntaje total (0–100) de un estudiante a partir de su '
-        'comportamiento y contexto demográfico — sin usar notas parciales.</p>',
+        '<div class="eyebrow">Herramienta de apoyo docente — Dataset UCI</div>',
+        '<h1>Predicción de Nota Final G3</h1>',
+        '<p>Estimación temprana de la nota final (0–20 puntos) a partir de la nota parcial G1 '
+        'y el perfil de comportamiento del estudiante.</p>',
         '</div>',
     ),
     unsafe_allow_html=True,
 )
 
 # ---------------------------------------------------------------------------
-# Panel lateral — únicamente las variables que sobrevivieron a la selección
-# por correlación en el notebook (ver Sección 2.5 del pipeline de entrenamiento)
+# Panel lateral — Controles según las features seleccionadas (|r| >= 0.10)
 # ---------------------------------------------------------------------------
 st.sidebar.markdown("## Perfil del estudiante")
 st.sidebar.markdown(
     _html(
-        '<p class="feature-note">Estos son los únicos campos que el modelo usa: '
-        'son las variables que, tras el filtro de correlación, quedaron seleccionadas '
-        'en el notebook de entrenamiento.</p>',
+        '<p class="feature-note">Ingresa los datos del estudiante para calcular la nota final predicha (G3) sobre 20 puntos.</p>',
     ),
     unsafe_allow_html=True,
 )
 
-st.sidebar.markdown("### Comportamiento y asistencia")
-attendance = st.sidebar.slider("Asistencia (%)", 0.0, 100.0, 80.0)
-age = st.sidebar.slider("Edad", 17, 30, 20)
-
-st.sidebar.markdown(_html('<div class="sidebar-rule"></div>'), unsafe_allow_html=True)
-st.sidebar.markdown("### Contexto")
-internet = st.sidebar.selectbox("Acceso a internet en casa", ["Yes", "No"])
-department = st.sidebar.selectbox("Departamento", ["CS", "Engineering", "Business", "Mathematics"])
-income = st.sidebar.selectbox("Nivel de ingreso familiar", ["Medium", "Low", "High"])
-parent_edu = st.sidebar.selectbox(
-    "Nivel educativo de los padres", ["Unknown", "High School", "Bachelor's", "Master's", "PhD"]
+st.sidebar.markdown("### Rendimiento y hábitos")
+g1 = st.sidebar.slider("Nota 1er Parcial (G1)", 0.0, 20.0, 12.0, help="Nota obtenida en el primer periodo (0-20)")
+failures = st.sidebar.slider("Materias reprobadas previas", 0, 3, 0)
+studytime_opt = st.sidebar.selectbox(
+    "Tiempo de estudio semanal",
+    options=[1, 2, 3, 4],
+    format_func=lambda x: {1: "1: <2 horas", 2: "2: 2 a 5 horas", 3: "3: 5 a 10 horas", 4: "4: >10 horas"}[x],
+    index=1
+)
+goout_opt = st.sidebar.selectbox(
+    "Frecuencia de salidas con amigos",
+    options=[1, 2, 3, 4, 5],
+    format_func=lambda x: f"{x}: {'Muy poco' if x==1 else 'Mucho' if x==5 else 'Medio'}",
+    index=2
 )
 
 st.sidebar.markdown(_html('<div class="sidebar-rule"></div>'), unsafe_allow_html=True)
-escalar_escala = st.sidebar.checkbox(
-    "Escalar salida a todo el rango (0 – 100)",
-    value=True,
-    help="Mapea la predicción relativa del modelo para ocupar todo el espectro visual de 0 a 100."
+st.sidebar.markdown("### Contexto personal y familiar")
+age = st.sidebar.slider("Edad", 15, 22, 17)
+traveltime_opt = st.sidebar.selectbox(
+    "Tiempo de traslado a la escuela",
+    options=[1, 2, 3, 4],
+    format_func=lambda x: {1: "1: <15 min", 2: "2: 15-30 min", 3: "3: 30-60 min", 4: "4: >1 hora"}[x],
+    index=0
 )
-st.sidebar.caption(
-    "Nota: dentro de Departamento, Ingreso e Educación de los padres, el modelo solo "
-    "distingue 'CS', 'Medium' y 'Unknown' respectivamente frente a todo lo demás — "
-    "son las únicas categorías que superaron el filtro de correlación."
+medu_opt = st.sidebar.selectbox(
+    "Educación de la madre (Medu)",
+    options=[0, 1, 2, 3, 4],
+    format_func=lambda x: {0: "0: Ninguna", 1: "1: Primaria", 2: "2: 5º-9º grado", 3: "3: Secundaria", 4: "4: Superior"}[x],
+    index=2
 )
+fedu_opt = st.sidebar.selectbox(
+    "Educación del padre (Fedu)",
+    options=[0, 1, 2, 3, 4],
+    format_func=lambda x: {0: "0: Ninguna", 1: "1: Primaria", 2: "2: 5º-9º grado", 3: "3: Secundaria", 4: "4: Superior"}[x],
+    index=2
+)
+mjob = st.sidebar.selectbox("Trabajo de la madre", ["health", "services", "at_home", "teacher", "other"])
+
+st.sidebar.markdown(_html('<div class="sidebar-rule"></div>'), unsafe_allow_html=True)
+st.sidebar.markdown("### Factores socioeducativos")
+higher = st.sidebar.selectbox("¿Desea cursar educación superior?", ["yes", "no"])
+internet = st.sidebar.selectbox("¿Acceso a internet en casa?", ["yes", "no"])
+romantic = st.sidebar.selectbox("¿En relación amorosa?", ["no", "yes"])
+paid = st.sidebar.selectbox("¿Clases particulares pagadas?", ["no", "yes"])
 
 # ---------------------------------------------------------------------------
-# Construcción del vector de features EXACTAMENTE con las columnas de entrenamiento
+# Construcción del vector de features
 # ---------------------------------------------------------------------------
 fila = {col: 0 for col in feature_columns}
 
-if "Attendance (%)" in fila:
-    fila["Attendance (%)"] = attendance
-if "Age" in fila:
-    fila["Age"] = age
-if "Internet_Access_at_Home" in fila:
-    fila["Internet_Access_at_Home"] = 1 if internet == "Yes" else 0
+if "G1" in fila: fila["G1"] = g1
+if "failures" in fila: fila["failures"] = failures
+if "studytime" in fila: fila["studytime"] = studytime_opt
+if "goout" in fila: fila["goout"] = goout_opt
+if "traveltime" in fila: fila["traveltime"] = traveltime_opt
+if "age" in fila: fila["age"] = age
+if "Medu" in fila: fila["Medu"] = medu_opt
+if "Fedu" in fila: fila["Fedu"] = fedu_opt
 
-# Variables dummy: se activa la columna correspondiente solo si existe entre las
-# features seleccionadas (la categoría base o "el resto" queda en 0)
-for col_name, valor in [
-    ("Department", department), ("Family_Income_Level", income), ("Parent_Education_Level", parent_edu),
+for col_prefix, val in [
+    ("higher", higher), ("paid", paid), ("internet", internet),
+    ("romantic", romantic), ("Mjob", mjob)
 ]:
-    dummy_col = f"{col_name}_{valor}"
+    dummy_col = f"{col_prefix}_{val}"
     if dummy_col in fila:
         fila[dummy_col] = 1
 
 perfil_df = pd.DataFrame([fila])[feature_columns]
 
 # ---------------------------------------------------------------------------
-# Predicción en tiempo real
+# Predicción
 # ---------------------------------------------------------------------------
 perfil_scaled = scaler.transform(perfil_df)
 if poly is not None:
@@ -259,71 +249,52 @@ if poly is not None:
 else:
     X_final = perfil_scaled
 
-prediccion_raw = float(model.predict(X_final)[0])
-
-# Límites del modelo para el espacio de entrada de las features
-PRED_MIN = 73.5810
-PRED_MAX = 79.4278
-
-if escalar_escala:
-    # Transformación Min-Max -> Rango 0 a 100
-    prediccion = ((prediccion_raw - PRED_MIN) / (PRED_MAX - PRED_MIN)) * 100.0
-else:
-    prediccion = prediccion_raw
-
-prediccion_clip = max(0.0, min(100.0, prediccion))
+prediccion = float(model.predict(X_final)[0])
+prediccion_clip = max(0.0, min(20.0, prediccion))
 
 color_banda, etiqueta_banda = banda_score(prediccion_clip)
 
-# --- Tarjeta: tacómetro + KPI -----------------------------------------------
-# TODO el card (arco + aguja + número + banda) se arma como UNA sola cadena
-# sin saltos de línea. Esto es lo que antes fallaba: al estar repartido en un
-# f"""...""" multilínea con indentación, Markdown cerraba el <div> a mitad de
-# camino y el resto se mostraba como texto/código plano.
+# --- Tarjeta: Tacómetro + KPI -----------------------------------------------
 st.markdown(
     _html(
         '<div class="card">',
         render_gauge(prediccion_clip),
-        f'<div class="kpi-number">{prediccion:.1f}<span style="font-size:1.1rem;color:#5B6577;"> / 100</span></div>',
+        f'<div class="kpi-number">{prediccion_clip:.1f}<span style="font-size:1.1rem;color:#5B6577;"> / 20</span></div>',
         f'<div class="kpi-band" style="color:{color_banda};">{etiqueta_banda}</div>',
         '</div>',
     ),
     unsafe_allow_html=True,
 )
 
-# --- Tarjeta: interpretación del error ---------------------------------------
+# --- Tarjeta: Interpretación del error ---------------------------------------
 st.markdown(
     _html(
         '<div class="card">',
         '<p style="margin:0; color:#1E2A44; font-size:1rem;">',
-        f'El modelo predice un puntaje de <b>{prediccion:.1f}</b>. ',
-        'Basado en el entrenamiento, esta estimación tiene un margen de error ',
-        f'promedio de <b>+/- {mae_test:.1f} puntos</b> (MAE sobre el set de prueba).',
+        f'El modelo predice una nota final (G3) de <b>{prediccion_clip:.1f} / 20</b>. ',
+        'Basado en la validación del set de prueba (UCI), la estimación tiene un margen de error promedio de ',
+        f'<b>+/- {mae_test:.2f} puntos</b> (MAE sobre el conjunto de test).',
         '</p>',
         '</div>',
     ),
     unsafe_allow_html=True,
 )
 
-# --- Detalle del perfil ingresado (opcional, plegado) -----------------------
-with st.expander("Ver el perfil ingresado"):
+# --- Detalle del perfil ingresado -------------------------------------------
+with st.expander("Ver el perfil completo ingresado"):
     resumen = pd.DataFrame({
-        "Variable": ["Asistencia (%)", "Edad", "Internet en casa", "Departamento",
-                     "Ingreso familiar", "Educación de los padres"],
-        "Valor": [str(v) for v in [attendance, age, internet, department, income, parent_edu]],
+        "Variable": ["Nota 1er Parcial (G1)", "Materias Reprobadas", "Tiempo de Estudio", "Edad", "Educación Madre (Medu)", "Desea Superior", "Internet en Casa"],
+        "Valor": [str(v) for v in [g1, failures, f"Categoría {studytime_opt}", age, medu_opt, higher, internet]],
     })
     st.dataframe(resumen, hide_index=True, width="stretch")
 
-# --- Nota de limitación del modelo ------------------------------------------
+# --- Nota metodológica ------------------------------------------------------
 st.markdown(
     _html(
         '<div class="limit-note">',
-        'Este modelo se entrenó sobre el dataset "Biased", donde ninguna variable de ',
-        'comportamiento o demográfica alcanzó una correlación relevante (|r| ≥ 0.05) con ',
-        'Total_Score — el R² de test es cercano a 0. En la práctica, el modelo se comporta ',
-        'como una estimación cercana al promedio histórico ajustada por señales muy débiles. ',
-        'Usa esta predicción únicamente como referencia orientativa, no como una medida ',
-        'precisa del desempeño del estudiante.',
+        '<b>Dataset UCI Student Performance:</b> Este modelo predice la nota final (G3, escala 0-20) ',
+        'utilizando la nota parcial G1 y factores socio-conductuales. Al excluir las notas intermedias G2, ',
+        'se logra una predicción temprana genuina para la detección a tiempo de estudiantes en riesgo.',
         '</div>',
     ),
     unsafe_allow_html=True,
